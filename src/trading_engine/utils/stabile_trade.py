@@ -17,10 +17,8 @@ def price_stability(client, symbol, stability):
     trade_std = np.std(np.array(ma_10)[:10]) / (ma_10[0] / stability)
     # Trade indication based on the std
     trade_ind = trade_std < 1
-    # Calculate buy and sell price
-    buy_price = np.round(ma_10[0] - 0.0005 * ma_10[0], 0)
 
-    return trade_ind, buy_price, np.round(trade_std, 2)
+    return trade_ind, ma_10[0], np.round(trade_std, 2)
 
 
 def moving_average(data: list, timeframe: int):
