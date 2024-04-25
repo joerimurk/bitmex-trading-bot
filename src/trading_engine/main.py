@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from src.trading_engine.utils.bitmex_helpers import (calculate_order_price,
+                                                     cancel_open_orders,
                                                      get_open_positions,
                                                      limit_order,
                                                      websocket_open_orders)
@@ -97,6 +98,7 @@ def set_buy_extra_and_sell_order():
     logger.info(f"Buy order placed: {ORDER_QUANTITY} contract(s) at {buy_extra_price}")
     logger.info(f"Sell order placed: {-ORDER_QUANTITY} contract(s) at {sell_price}")
     _ = websocket_open_orders()
+    cancel_open_orders()
 
 
 def set_second_buy_order(open_position):
