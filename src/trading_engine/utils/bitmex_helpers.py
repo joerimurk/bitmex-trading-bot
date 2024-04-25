@@ -5,6 +5,7 @@ import os
 import time
 import urllib
 
+import numpy as np
 from websocket import create_connection
 
 from src.trading_engine.utils.constants import BITMEX_URL, ENDPOINT, VERB
@@ -32,6 +33,14 @@ def cancel_open_orders(client):
 def get_open_positions(client, symbol):
     """Bitmex get all open orders"""
     return client.Position.Position_get().result()[0]
+
+
+def calculate_order_price(price, margin, positive):
+    """Calculate price based on positive or negative margin"""
+    if positive:
+        return np.round(price + (margin * price), 1)
+    else:
+        return np.round(price - (margin * price), 1)
 
 
 def websocket_open_orders(timeout=None):
@@ -70,7 +79,6 @@ def websocket_open_orders(timeout=None):
         bought_successfully = True
     except:
         bought_successfully = False
-        print("5 minutes past, close order")
 
     ws.close()
 
