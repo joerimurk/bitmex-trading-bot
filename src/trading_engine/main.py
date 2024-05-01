@@ -6,11 +6,12 @@ import numpy as np
 from dotenv import load_dotenv
 from loguru import logger
 
-from src.trading_engine.utils.bitmex_helpers import (calculate_order_price,
+from src.trading_engine.utils.bitmex_helpers import (WebsocketPrice,
+                                                     calculate_order_price,
                                                      cancel_open_orders,
+                                                     get_open_orders,
                                                      get_open_positions,
-                                                     limit_order,
-                                                     websocket_open_orders)
+                                                     limit_order)
 from src.trading_engine.utils.constants import (BUY_EXTRA_MARGIN,
                                                 ORDER_QUANTITY, PROFIT_MARGIN,
                                                 STABILITY, SYMBOL, TIMEOUT)
@@ -43,27 +44,25 @@ def trading_engine():
             bought_successfully = set_first_buy_order(average_price)
 
             if not bought_successfully:
+                cancel_open_orders(BITMEX_CLIENT)
                 logger.info(
-                    f"Buy order cancelled, 5 minutes have passed, start over again.."
+                    "Buy order cancelled, 5 minutes have passed, start over again.."
                 )
                 continue
 
             # get buy price and set new buy and sell price
-            set_buy_extra_and_sell_order()
+            sold_successfully = set_buy_extra_and_sell_order()
 
-            # check if bought extra or sold
-            open_position = get_open_positions(BITMEX_CLIENT, SYMBOL)
             # sold position, start trading again
-            if len(open_position) == 0:
+            if sold_successfully:
                 get_profit()
                 continue
             else:
+                open_position = get_open_positions(BITMEX_CLIENT)
                 # bought extra so new sell order
-                set_second_buy_order(open_position)
-
-                # wait for selling
-                _ = websocket_open_orders()
+                sold_successfully = set_second_buy_order(open_position)
                 get_profit()
+                continue
 
         else:
             logger.info(f"Wait for trading, standard deviation too high: {trade_std}")
@@ -77,13 +76,19 @@ def set_first_buy_order(price):
     )
     limit_order(BITMEX_CLIENT, SYMBOL, ORDER_QUANTITY, buy_price)
     logger.info(f"Buy order placed: {ORDER_QUANTITY} contract(s) at {buy_price}")
-    bought_successfully = websocket_open_orders(timeout=TIMEOUT)
-    return bought_successfully
+    while True:
+        buy_price_reached, _, timeout_reached = WebsocketPrice(
+            client=BITMEX_CLIENT, symbol=SYMBOL, buy_price=buy_price, timeout=TIMEOUT
+        ).start_websocket()
+        if buy_price_reached:
+            return True
+        elif timeout_reached:
+            return False
 
 
 def set_buy_extra_and_sell_order():
     """Set buy extra and sell order"""
-    bought_price = get_open_positions(BITMEX_CLIENT, SYMBOL)[0]["avgEntryPrice"]
+    bought_price = get_open_positions(BITMEX_CLIENT)[0]["avgEntryPrice"]
     logger.info(
         f"Buy order filled, open position: {ORDER_QUANTITY} contract(s) at {bought_price}"
     )
@@ -97,8 +102,21 @@ def set_buy_extra_and_sell_order():
     limit_order(BITMEX_CLIENT, SYMBOL, -ORDER_QUANTITY, sell_price)
     logger.info(f"Buy order placed: {ORDER_QUANTITY} contract(s) at {buy_extra_price}")
     logger.info(f"Sell order placed: {-ORDER_QUANTITY} contract(s) at {sell_price}")
-    _ = websocket_open_orders()
-    cancel_open_orders()
+
+    while True:
+        buy_price_reached, sell_price_reached, _ = WebsocketPrice(
+            client=BITMEX_CLIENT,
+            symbol=SYMBOL,
+            buy_price=buy_extra_price,
+            sell_price=sell_price,
+        ).start_websocket()
+
+        if sell_price_reached:
+            cancel_open_orders(BITMEX_CLIENT)
+            return True
+        elif buy_price_reached:
+            cancel_open_orders(BITMEX_CLIENT)
+            return False
 
 
 def set_second_buy_order(open_position):
@@ -113,6 +131,16 @@ def set_second_buy_order(open_position):
     )
     limit_order(BITMEX_CLIENT, SYMBOL, -open_quantity, sell_price)
     logger.info(f"Sell order placed: {-open_quantity} contract(s) at {sell_price}")
+
+    while True:
+        _, sell_price_reached, _ = WebsocketPrice(
+            client=BITMEX_CLIENT,
+            symbol=SYMBOL,
+            sell_price=sell_price,
+        ).start_websocket()
+
+        if sell_price_reached:
+            return True
 
 
 def get_profit():
