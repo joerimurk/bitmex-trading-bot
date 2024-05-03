@@ -6,15 +6,22 @@ import numpy as np
 from dotenv import load_dotenv
 from loguru import logger
 
-from src.trading_engine.utils.bitmex_helpers import (WebsocketPrice,
-                                                     calculate_order_price,
-                                                     cancel_open_orders,
-                                                     get_open_orders,
-                                                     get_open_positions,
-                                                     limit_order)
-from src.trading_engine.utils.constants import (BUY_EXTRA_MARGIN,
-                                                ORDER_QUANTITY, PROFIT_MARGIN,
-                                                STABILITY, SYMBOL, TIMEOUT)
+from src.trading_engine.utils.bitmex_helpers import (
+    WebsocketPrice,
+    calculate_order_price,
+    cancel_open_orders,
+    get_open_orders,
+    get_open_positions,
+    limit_order,
+)
+from src.trading_engine.utils.constants import (
+    BUY_EXTRA_MARGIN,
+    ORDER_QUANTITY,
+    PROFIT_MARGIN,
+    STABILITY,
+    SYMBOL,
+    TIMEOUT,
+)
 from src.trading_engine.utils.stabile_trade import price_stability
 
 load_dotenv()
@@ -41,7 +48,7 @@ def trading_engine():
             logger.info(f"Start trading, volatility low enough: {trade_std}")
 
             # set buy order and start order websocket
-            bought_successfully = set_first_buy_order(average_price)
+            bought_successfully, order_id = set_first_buy_order(average_price)
 
             if not bought_successfully:
                 cancel_open_orders(BITMEX_CLIENT)
@@ -51,16 +58,15 @@ def trading_engine():
                 continue
 
             # get buy price and set new buy and sell price
-            sold_successfully = set_buy_extra_and_sell_order()
+            sold_successfully, new_order_id = set_buy_extra_and_sell_order(order_id)
 
             # sold position, start trading again
             if sold_successfully:
                 get_profit()
                 continue
             else:
-                open_position = get_open_positions(BITMEX_CLIENT)
                 # bought extra so new sell order
-                sold_successfully = set_second_buy_order(open_position)
+                sold_successfully = set_sell_order(order_id, new_order_id)
                 get_profit()
                 continue
 
@@ -74,21 +80,26 @@ def set_first_buy_order(price):
     buy_price = calculate_order_price(
         price=price, margin=(PROFIT_MARGIN / 2), positive=False
     )
-    limit_order(BITMEX_CLIENT, SYMBOL, ORDER_QUANTITY, buy_price)
+    order_id = limit_order(BITMEX_CLIENT, SYMBOL, ORDER_QUANTITY, buy_price)
     logger.info(f"Buy order placed: {ORDER_QUANTITY} contract(s) at {buy_price}")
     while True:
         buy_price_reached, _, timeout_reached = WebsocketPrice(
             client=BITMEX_CLIENT, symbol=SYMBOL, buy_price=buy_price, timeout=TIMEOUT
         ).start_websocket()
         if buy_price_reached:
-            return True
+            return True, order_id
         elif timeout_reached:
-            return False
+            return False, order_id
 
 
-def set_buy_extra_and_sell_order():
+def set_buy_extra_and_sell_order(order_id):
     """Set buy extra and sell order"""
-    bought_price = get_open_positions(BITMEX_CLIENT)[0]["avgEntryPrice"]
+    buy_order = get_open_orders(BITMEX_CLIENT, order_id)
+    if buy_order["ordStatus"] == "Filled":
+        bought_price = buy_order["avgPx"]
+    else:
+        raise Exception("Buy order not filled yet..")
+
     logger.info(
         f"Buy order filled, open position: {ORDER_QUANTITY} contract(s) at {bought_price}"
     )
@@ -98,8 +109,8 @@ def set_buy_extra_and_sell_order():
     sell_price = calculate_order_price(
         price=bought_price, margin=PROFIT_MARGIN, positive=True
     )
-    limit_order(BITMEX_CLIENT, SYMBOL, ORDER_QUANTITY, buy_extra_price)
-    limit_order(BITMEX_CLIENT, SYMBOL, -ORDER_QUANTITY, sell_price)
+    buy_order_id = limit_order(BITMEX_CLIENT, SYMBOL, ORDER_QUANTITY, buy_extra_price)
+    sell_order_id = limit_order(BITMEX_CLIENT, SYMBOL, -ORDER_QUANTITY, sell_price)
     logger.info(f"Buy order placed: {ORDER_QUANTITY} contract(s) at {buy_extra_price}")
     logger.info(f"Sell order placed: {-ORDER_QUANTITY} contract(s) at {sell_price}")
 
@@ -113,24 +124,34 @@ def set_buy_extra_and_sell_order():
 
         if sell_price_reached:
             cancel_open_orders(BITMEX_CLIENT)
-            return True
+            return True, sell_order_id
         elif buy_price_reached:
             cancel_open_orders(BITMEX_CLIENT)
-            return False
+            return False, buy_order_id
 
 
-def set_second_buy_order(open_position):
+def set_sell_order(order_id, new_order_id):
     """Set first buy order"""
-    open_price = open_position[0]["avgEntryPrice"]
-    open_quantity = open_position[0]["currentQty"]
+    first_buy_order = get_open_orders(BITMEX_CLIENT, order_id)
+    second_buy_order = get_open_orders(BITMEX_CLIENT, new_order_id)
+
+    if second_buy_order["ordStatus"] == "Filled":
+        second_buy_price = second_buy_order["avgPx"]
+        first_buy_price = first_buy_order["avgPx"]
+    else:
+        raise Exception("Buy order not filled yet..")
+
+    average_price = np.round((first_buy_price + second_buy_price) / 2, 2)
+
     logger.info(
-        f"Buy order filled, open position: {open_quantity} contract(s) at {open_price}"
+        f"Buy order filled, open position: {ORDER_QUANTITY*2} contract(s) at {average_price}"
     )
+
     sell_price = calculate_order_price(
-        price=open_price, margin=PROFIT_MARGIN, positive=True
+        price=average_price, margin=PROFIT_MARGIN, positive=True
     )
-    limit_order(BITMEX_CLIENT, SYMBOL, -open_quantity, sell_price)
-    logger.info(f"Sell order placed: {-open_quantity} contract(s) at {sell_price}")
+    order_id = limit_order(BITMEX_CLIENT, SYMBOL, -2 * ORDER_QUANTITY, sell_price)
+    logger.info(f"Sell order placed: {-2 * ORDER_QUANTITY} contract(s) at {sell_price}")
 
     while True:
         _, sell_price_reached, _ = WebsocketPrice(

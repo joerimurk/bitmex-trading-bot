@@ -1,23 +1,23 @@
+import json
 import time
 
 import numpy as np
 import websocket
 from loguru import logger
-import json
 
 
 def limit_order(client, symbol, order_quantity, price):
     """Bitmex place limit order"""
-    _ = client.Order.Order_new(
+    return client.Order.Order_new(
         symbol=symbol, ordType="Limit", orderQty=order_quantity, price=price
-    ).result()
+    ).result()[0]["orderID"]
 
 
-def get_open_orders(client, symbol):
+def get_open_orders(client, order_id):
     """Bitmex get all open orders"""
-    return client.Order.Order_getOrders(
-        symbol=symbol, filter='{"open": true}'
-    ).result()[0]
+    return client.Order.Order_getOrders(filter=f'{{"orderID": "{order_id}"}}').result()[
+        0
+    ][0]
 
 
 def cancel_open_orders(client):
@@ -89,7 +89,7 @@ class WebsocketPrice:
 
     def on_close(self, ws, a, b):
         """Function called when closing websocket"""
-        logger.info("### closed ###")
+        # logger.info("### closed ###")
 
     @staticmethod
     def get_price(message):
