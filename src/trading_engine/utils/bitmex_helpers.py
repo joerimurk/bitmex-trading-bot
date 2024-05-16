@@ -13,11 +13,15 @@ def limit_order(client, symbol, order_quantity, price):
     ).result()[0]["orderID"]
 
 
-def get_open_orders(client, order_id):
-    """Bitmex get all open orders"""
-    return client.Order.Order_getOrders(filter=f'{{"orderID": "{order_id}"}}').result()[
-        0
-    ][0]
+def get_filled_price(client, order_id):
+    """Bitmex get filled price of order"""
+    order = client.Order.Order_getOrders(
+        filter=f'{{"orderID": "{order_id}"}}'
+    ).result()[0][0]
+    if order["ordStatus"] == "Filled":
+        return order["avgPx"]
+    else:
+        raise Exception("Order not filled yet..")
 
 
 def cancel_open_orders(client):
@@ -28,14 +32,6 @@ def cancel_open_orders(client):
 def get_open_positions(client):
     """Bitmex get all open orders"""
     return client.Position.Position_get().result()[0]
-
-
-def calculate_order_price(price, margin, positive):
-    """Calculate price based on positive or negative margin"""
-    if positive:
-        return np.round(price + (margin * price), 1)
-    else:
-        return np.round(price - (margin * price), 1)
 
 
 class WebsocketPrice:
