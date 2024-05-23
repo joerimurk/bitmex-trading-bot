@@ -1,17 +1,13 @@
 import time
+import uuid
+from datetime import datetime
 
 import numpy as np
-from dotenv import load_dotenv
 from loguru import logger
-
-from src.trading_engine.utils.bitmex_helpers import (WebsocketPrice,
-                                                     calculate_order_price,
-                                                     cancel_open_orders,
-                                                     get_filled_price,
-                                                     limit_order)
-from src.trading_engine.utils.price_stability import price_stability
-
-load_dotenv()
+from utils.bitmex_helpers import (WebsocketPrice, cancel_open_orders,
+                                  get_balance, get_filled_price, limit_order)
+from utils.database_orm import Balance, Orders
+from utils.price_stability import price_stability
 
 
 class TradingAlgorthm:
@@ -28,6 +24,7 @@ class TradingAlgorthm:
         buy_extra_margin,
         order_size,
         timeout,
+        session,
     ):
         self.client = client
         self.symbol = symbol
@@ -36,6 +33,7 @@ class TradingAlgorthm:
         self.buy_extra_margin = buy_extra_margin
         self.order_size = order_size
         self.timeout = timeout
+        self.session = session
 
     def run(self):
         """
@@ -51,6 +49,7 @@ class TradingAlgorthm:
 
             # check if price stable enough
             if trade_ind:
+                pre_balance = get_balance(self.client)
                 logger.info(f"Start trading, volatility low enough: {trade_std}")
 
             # if not stable enough, wait a minute and start over
@@ -73,16 +72,22 @@ class TradingAlgorthm:
                 continue
 
             # get buy price and set new buy and sell price
-            sold_successfully, price = self.set_buy_extra_and_sell_order(bought_price)
+            sold_successfully, price, sell_order_id = self.set_buy_extra_and_sell_order(
+                bought_price
+            )
 
             # sold position, start trading again
             if sold_successfully:
-                self.get_profit()
+                self.get_profit(pre_balance, sell_order_id)
+                self.session.commit()
                 continue
             else:
                 # bought extra so new sell order
-                sold_successfully = self.set_sell_order(bought_price, price)
-                self.get_profit()
+                sold_successfully, sell_order_id = self.set_sell_order(
+                    bought_price, price
+                )
+                self.get_profit(pre_balance, sell_order_id)
+                self.session.commit()
                 continue
 
     def set_first_buy_order(self, average_price):
@@ -93,7 +98,7 @@ class TradingAlgorthm:
         otherwise False.
         """
         # calculate the buy price based on the average price
-        buy_price = calculate_order_price(
+        buy_price = self.calculate_order_price(
             price=average_price, margin=(self.profit_margin / 2), positive=False
         )
         # place buy order
@@ -113,7 +118,14 @@ class TradingAlgorthm:
                 # check if buy order filled
                 bought_price = get_filled_price(self.client, order_id)
 
-                # TODO: LOG TO DATABASE
+                order = Orders(
+                    order_id=order_id,
+                    quantity=self.order_size,
+                    price=bought_price,
+                    timestamp=datetime.now(),
+                )
+                self.session.add(order)
+
                 logger.info(
                     f"Buy order filled, open position: {self.order_size} contract(s) at {bought_price}"
                 )
@@ -155,16 +167,31 @@ class TradingAlgorthm:
                 sell_price=sell_price,
             ).start_websocket()
 
-            # TODO: LOG BOTH TO DATABASE
             if sell_price_reached:
                 cancel_open_orders(self.client)
                 sell_price = get_filled_price(self.client, sell_order_id)
-                return True, sell_price
+                order = Orders(
+                    order_id=sell_order_id,
+                    quantity=-self.order_size,
+                    price=sell_price,
+                    timestamp=datetime.now(),
+                )
+                self.session.add(order)
+
+                return True, sell_price, sell_order_id
 
             elif buy_price_reached:
                 cancel_open_orders(self.client)
                 second_buy_price = get_filled_price(self.client, buy_order_id)
-                return False, second_buy_price
+                order = Orders(
+                    order_id=buy_order_id,
+                    quantity=self.order_size,
+                    price=second_buy_price,
+                    timestamp=datetime.now(),
+                )
+                self.session.add(order)
+
+                return False, second_buy_price, None
 
     def set_sell_order(self, first_buy_price, second_buy_price):
         """Set final sell order"""
@@ -191,10 +218,17 @@ class TradingAlgorthm:
                 sell_price=sell_price,
             ).start_websocket()
 
-            # LOG TO DATABASE
             if sell_price_reached:
                 sell_price = get_filled_price(self.client, order_id)
-                return sell_price
+                order = Orders(
+                    order_id=order_id,
+                    quantity=-2 * self.order_size,
+                    price=sell_price,
+                    timestamp=datetime.now(),
+                )
+                self.session.add(order)
+
+                return sell_price, order_id
 
     def calculate_order_price(self, price, margin, positive):
         """Calculate price based on positive or negative margin"""
@@ -203,10 +237,20 @@ class TradingAlgorthm:
         else:
             return np.round(price - (margin * price), 1)
 
-    def get_profit(self):
+    def get_profit(self, pre_balance, sell_order_id):
         """Get profit"""
-        sold_price = None
-        sold_quantity = None
-        profit_made = None
-        logger.info(f"Sell order filled: {sold_quantity} contract(s) at {sold_price}")
-        logger.success(f"Done trading, profit made: {profit_made} BTC (... euro)")
+        # sleep to make sure balance is updated
+        time.sleep(10)
+        post_balance = get_balance(self.client)
+
+        balance = Balance(
+            id=str(uuid.uuid4()),
+            balance_before=pre_balance,
+            balance_after=post_balance,
+            timestamp=datetime.now(),
+            sell_order_id=sell_order_id,
+        )
+        self.session.add(balance)
+        logger.success(
+            f"Done trading, profit made: {post_balance-pre_balance} BTC (... euro)"
+        )
