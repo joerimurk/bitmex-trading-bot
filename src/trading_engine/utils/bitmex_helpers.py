@@ -13,7 +13,7 @@ def limit_order(client, symbol, order_quantity, price):
     ).result()[0]["orderID"]
 
 
-def get_filled_price(client, order_id):
+def get_filled_price(client, order_id, retry=True):
     """Bitmex get filled price of order"""
     order = client.Order.Order_getOrders(
         filter=f'{{"orderID": "{order_id}"}}'
@@ -21,6 +21,10 @@ def get_filled_price(client, order_id):
     if order["ordStatus"] == "Filled":
         return order["avgPx"]
     else:
+        # if not filled, wait 10 seconds and check again
+        if retry:
+            time.sleep(10)
+            return get_filled_price(client, order_id, retry=False)
         raise Exception("Order not filled yet..")
 
 
@@ -32,6 +36,14 @@ def cancel_open_orders(client):
 def get_open_positions(client):
     """Bitmex get all open orders"""
     return client.Position.Position_get().result()[0]
+
+
+def get_balance(client):
+    return np.round(
+        client.User.User_getWalletHistory(count=2).result()[0][0]["walletBalance"]
+        / 100000000,
+        10,
+    )
 
 
 class WebsocketPrice:
