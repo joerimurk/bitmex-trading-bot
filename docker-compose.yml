@@ -7,7 +7,11 @@ services:
     # Mount entire project into docker container under /app
     volumes:
       - ./requirements.txt:/requirements.txt
-      - ./src/trading_database/:/app
+      - ./src/trading_engine/:/app
+    
+    # Should not be needed
+    env_file:
+      - ./.env
 
     # Make all ports accessible on host
     network_mode: host
@@ -15,4 +19,4 @@ services:
     # Install requirements and start flask app
     entrypoint: >
       bash -c "pip install -r /requirements.txt
-      && python /app/test.py"
+      && python /app/main.py"
