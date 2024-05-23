@@ -1,5 +1,5 @@
 SYMBOL = "ETHUSD"
-ORDER_QUANTITY = 1
+ORDER_QUANTITY = 2
 STABILITY = 3000
 
 BITMEX_URL = "wss://www.bitmex.com"
