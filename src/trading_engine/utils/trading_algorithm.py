@@ -1,3 +1,4 @@
+import os
 import time
 import uuid
 from datetime import datetime
@@ -8,6 +9,8 @@ from utils.bitmex_helpers import (WebsocketPrice, cancel_open_orders,
                                   get_balance, get_filled_price, limit_order)
 from utils.database_orm import Balance, Orders
 from utils.price_stability import price_stability
+
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 
 class TradingAlgorthm:
@@ -25,6 +28,7 @@ class TradingAlgorthm:
         order_size,
         timeout,
         session,
+        telegram_bot,
     ):
         self.client = client
         self.symbol = symbol
@@ -34,6 +38,7 @@ class TradingAlgorthm:
         self.order_size = order_size
         self.timeout = timeout
         self.session = session
+        self.telegram_bot = telegram_bot
 
     def run(self):
         """
@@ -124,6 +129,10 @@ class TradingAlgorthm:
                     price=bought_price,
                     timestamp=datetime.now(),
                 )
+                self.telegram_bot.send_message(
+                    TELEGRAM_CHAT_ID,
+                    f"{self.order_size} contracts bought at {bought_price}",
+                )
                 self.session.add(order)
 
                 logger.info(
@@ -176,6 +185,10 @@ class TradingAlgorthm:
                     price=sell_price,
                     timestamp=datetime.now(),
                 )
+                self.telegram_bot.send_message(
+                    TELEGRAM_CHAT_ID,
+                    f"{self.order_size} contracts sold at {sell_price}",
+                )
                 self.session.add(order)
 
                 return True, sell_price, sell_order_id
@@ -188,6 +201,10 @@ class TradingAlgorthm:
                     quantity=self.order_size,
                     price=second_buy_price,
                     timestamp=datetime.now(),
+                )
+                self.telegram_bot.send_message(
+                    TELEGRAM_CHAT_ID,
+                    f"{self.order_size} contracts bought at {second_buy_price}",
                 )
                 self.session.add(order)
 
@@ -225,6 +242,10 @@ class TradingAlgorthm:
                     quantity=-2 * self.order_size,
                     price=sell_price,
                     timestamp=datetime.now(),
+                )
+                self.telegram_bot.send_message(
+                    TELEGRAM_CHAT_ID,
+                    f"{-2 * self.order_size} contracts sold at {sell_price}",
                 )
                 self.session.add(order)
 
