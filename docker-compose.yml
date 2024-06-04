@@ -20,3 +20,21 @@ services:
     entrypoint: >
       bash -c "pip install -r /requirements.txt
       && python /app/main.py"
+
+  dashboard:
+    image: "python:3.10-slim"
+    container_name: dashboard
+
+    # Mount entire project into docker container under /app
+    volumes:
+      - ./requirements.txt:/requirements.txt
+      - ./src/trading_dashboard/:/app
+      - ./src/trading_engine/trades.db:/trades.db
+    
+    # Make all ports accessible on host
+    network_mode: host
+
+    # Install requirements and start flask app
+    entrypoint: >
+      bash -c "pip install -r /requirements.txt
+      && streamlit run /app/dashboard.py"

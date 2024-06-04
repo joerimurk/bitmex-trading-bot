@@ -4,3 +4,7 @@ SQLAlchemy==2.0.29
 websocket-client==1.3.1
 numpy==1.24.4
 pyTelegramBotAPI==4.18.1
+pandas==2.2.2
+streamlit==1.35.0
+bitcoin-value==1.6.0
+plotly==5.22.0
