@@ -1,0 +1,22 @@
+version: "3.7"
+services:
+  app:
+    image: "python:3.10-slim"
+    container_name: backend
+
+    # Mount entire project into docker container under /app
+    volumes:
+      - ./requirements.txt:/requirements.txt
+      - ./src/trading_engine/:/app
+    
+    # Should not be needed
+    env_file:
+      - ./.env
+
+    # Make all ports accessible on host
+    network_mode: host
+
+    # Install requirements and start flask app
+    entrypoint: >
+      bash -c "pip install -r /requirements.txt
+      && python /app/main.py"
